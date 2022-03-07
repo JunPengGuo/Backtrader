@@ -8,6 +8,7 @@ from simplejson import OrderedDict
 class Strategy(bt.Strategy):
     params = (
         ('exitbars', 5),
+        ('maperiod', 15),
     )
     
     # a simple Strategy class
@@ -17,7 +18,12 @@ class Strategy(bt.Strategy):
     
     def __init__(self) -> None:
         self.dataclose = self.datas[0].close
+        
         self.order = None
+        self.buyprice = None
+        self.buycomm = None
+        
+        self.sma = bt.indicators.SimpleMovingAverage(self.datas[0], period=self.params.maperiod)
     
     def notify_order(self, order):
         if order.status in [order.Submitted, order.Accepted]:
@@ -40,20 +46,26 @@ class Strategy(bt.Strategy):
         
         self.order = None
 
-    def notify_trade(self, trader):
-        pass
+    def notify_trade(self, trade):
+        if not trade.isclosed:
+            return
+        
+        self.log('OPERATION PROFIT, GROSS {0:.2f}, NET {1:.2f}'.format(trade.pnl, trade.pnlcomm))
 
     def next(self):
         # self.log("Close {0}, previous Close {1}".format(self.dataclose[0], self.dataclose[-1]))
+        
+        if self.order:
+            return
+        
         if not self.position:
-            if self.dataclose[0] < self.dataclose[-1]:
+            if self.dataclose[0] > self.sma[0]:
                 # current close price less than previous close price
-                if self.dataclose[-1] < self.dataclose[-2]:
-                    self.log('BUY CREATE at {0}'.format(self.dataclose[0]))
-                    self.order = self.buy()
+                self.log('BUY CREATE, {0:.2f}'.format(self.dataclose[0]))
+                self.order = self.buy()
         else:
-            if len(self) >= (self.bar_executed + 5):
-                self.log('SELL CREATE at {0}'.format(self.dataclose[0]))
+            if self.dataclose[0] < self.sma[0]:
+                self.log('SELL CREATE, {0:.2f}'.format(self.dataclose[0]))
                 self.order = self.sell()
 
 
@@ -61,7 +73,8 @@ if __name__ == '__main__':
     cerebro = bt.Cerebro()
     cerebro.addstrategy(Strategy)
     
-    cerebro.broker.setcash(110000.0) # set cache
+    cerebro.broker.setcash(100000.0) # set cache
+    cerebro.addsizer(bt.sizers.FixedSize, stake=10)
     cerebro.broker.setcommission(commission=0.001)
     print(cerebro.broker.getvalue())
     
@@ -86,3 +99,4 @@ if __name__ == '__main__':
     cerebro.run()
     
     print(cerebro.broker.getvalue())
+    cerebro.plot()
